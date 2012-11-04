@@ -1,0 +1,44 @@
+Clear:
+  in:
+    - Color
+
+Interpolation:
+  in:
+    - Duration
+    - Repeat
+    - Tension
+    - Value1
+    - Value2
+    - Interpolation
+  out:
+    - Value
+
+Random:
+  in:
+    - Min
+    - Max
+  out:
+    - Value
+
+FPSDisplay:
+  in:
+    - Mode
+
+ColorFromComponents:
+  in:
+    - 1
+    - 2
+    - 3
+    - Alpha
+  out:
+    - Color
+
+ImageFilter:
+  in:
+    - Color0
+    - Color1
+    - Center_X
+    - Center_Y
+    - Radius
+  out:
+    - Image
