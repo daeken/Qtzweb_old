@@ -11,6 +11,15 @@ def pruneUserInfo(data):
       del data['userInfo']
     map(pruneUserInfo, data.values())
 
+def fix(name):
+  if name.startswith('input') and len(name) > 5:
+    name = name[5:]
+  elif name.startswith('output') and len(name) > 6:
+    name = name[6:]
+  if name[0] in '0123456789':
+    return '_' + name
+  return name
+
 def dump(plist):
   #pprint(plist)
   def dumpNode(obj, tab=0):
@@ -33,14 +42,22 @@ def dump(plist):
       state = node['state']
       if 'customInputPortStates' in state:
         for name in state['customInputPortStates']:
-          anodes[node['key']][2].append(name[5:])
+          name = fix(name)
+          if name not in anodes[node['key']][2]:
+            anodes[node['key']][2].append(name)
       if 'ivarInputPortStates' in state:
         for name in state['ivarInputPortStates']:
-          anodes[node['key']][2].append(name[5:])
+          name = fix(name)
+          if name not in anodes[node['key']][2]:
+            anodes[node['key']][2].append(name)
 
     for conn in connections:
-      anodes[conn['destinationNode']][2].append(conn['destinationPort'][5:])
-      anodes[conn['sourceNode']][3].append(conn['sourcePort'][6:])
+      dest = fix(conn['destinationPort'])
+      if dest not in anodes[conn['destinationNode']][2]:
+        anodes[conn['destinationNode']][2].append(dest)
+      src = fix(conn['sourcePort'])
+      if src not in anodes[conn['sourceNode']][3]:
+        anodes[conn['sourceNode']][3].append(src)
 
     for name, (cls, format, inp, out, snode) in anodes.items():
       line('%s(%s%s):' % (name, cls, '.' + format if format else ''), 1)
@@ -67,17 +84,21 @@ class Node(object):
     self.cls = self.__class__.__name__
     self.outports = {}
     for port in self._outports:
-      self.outports[port] = OutPort(self, str(port))
+      port = fix(str(port))
+      if port not in self.outports:
+        self.outports[port] = OutPort(self, port)
 
     self.inports = {}
     for port in self._inports:
-      self.inports[str(port)] = None
+      port = fix(str(port))
+      if port not in self.inports:
+        self.inports[port] = None
 
   def outport(self, name):
-    return self.outports[name[6:]].ref()
+    return self.outports[fix(name)].ref()
 
   def inport(self, name, value):
-    self.inports[name[5:]] = value
+    self.inports[fix(name)] = value
 
 class OutPort(object):
   def __init__(self, srcnode, srcport):
@@ -113,7 +134,8 @@ class QCPatch(Node):
 
       if 'customInputPortStates' in estate:
         for k, v in estate['customInputPortStates'].items():
-          node.inport(k, v['value'])
+          if 'value' in v:
+            node.inport(k, v['value'])
       if 'ivarInputPortStates' in estate:
         for k, v in estate['ivarInputPortStates'].items():
           node.inport(k, v['value'])
@@ -129,6 +151,7 @@ class QCPatch(Node):
       if source[0] not in deps[dest[0]]:
         deps[dest[0]].append(source[0])
 
+    # XXX: Have to have a way to specify ordering of nodes ... Clear should be first.
     self.order = []
     while len(deps):
       for name, v in deps.items():
@@ -156,9 +179,10 @@ class QCPatch(Node):
       node = self.nodes[name]
       for pname, value in node.inports.items():
         if isinstance(value, OutPort):
-          code += '\tthis.nodes.%s.params.%s = this.nodes.%s.%s;\n' % (name, pname, value.srcnode.name, value.srcport)
+          code += '\tthis.nodes.%s.params.%s = this.nodes.%s.outs.%s;\n' % (name, pname, value.srcnode.name, value.srcport)
       code += '\tthis.nodes.%s.update();\n' % name
-    code += '});'
+    code += '});\n'
+    code += 'run(%s);' % self.name
     return code
 
 classes = load(file('classes.yaml').read())
@@ -176,10 +200,15 @@ def main(fn):
   del data['templateImageData']
   pruneUserInfo(data)
 
+  print '<pre>'
   dump(data)
+  print '</pre>'
 
   root = QCPatch(data['rootPatch'])
+  print '<script src="qc.js"></script>'
+  print '<script>'
   print root.code()
+  print '</script>'
 
 if __name__=='__main__':
   sys.exit(main(*sys.argv[1:]))
