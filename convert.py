@@ -4,9 +4,10 @@ from pprint import pprint
 import yaml
 import json
 try:
-  from jsmin import jsmin
+  from jsmin import jsmin as jsmin_
 except:
-  jsmin = lambda x: x
+  jsmin_ = lambda x: x
+import httplib, urllib
 
 jsdeps = ['matrix', 'base']
 
@@ -46,21 +47,20 @@ def fix(name):
     return '_' + name
   return name
 
-"""
-def shadermin(shader)
-  shader.gsub! '$resolution', 'r'
-  shader.gsub! '$time', 'r.z'
-  shader.gsub! /\/\/.*$/, ''
-  shader.gsub! /\s+/m, ' '
-  shader.gsub! /\/\*.*?\*\//, ''
-  shader.gsub! /\.0+([^0-9])/, '.\1'
-  shader.gsub! /0+([1-9]+\.[^a-z_])/i, '\1'
-  shader.gsub! /0+([1-9]*\.[0-9])/, '\1'
-  shader.gsub! /\s*(;|{|}|\(|\)|=|\+|-|\*|\/|\[|\]|,|\.|%|!|~|\?|:|<|>)\s*/m, '\1'
-  shader.strip!
-  shader
-end
-"""
+def closureCompile(code):
+  params = urllib.urlencode([
+      ('js_code', code),
+      ('compilation_level', 'ADVANCED_OPTIMIZATIONS'),
+      ('output_format', 'text'),
+      ('output_info', 'compiled_code'),
+    ])
+
+  headers = { "Content-type": "application/x-www-form-urlencoded" }
+  conn = httplib.HTTPConnection('closure-compiler.appspot.com')
+  conn.request('POST', '/compile', params, headers)
+  response = conn.getresponse()
+  data = response.read()
+  return data
 
 def shadermin(shader):
   out = [shader]
@@ -88,6 +88,10 @@ def processJS(code):
     out += first
     out += repr(shadermin(body))
   return out
+
+def jsmin(code):
+  #return closureCompile(code)
+  return jsmin_(code)
 
 def rewriteJS(script):
   script = re.sub(r'/\*[\s\S]*?\*/', '', script, flags=re.M)
