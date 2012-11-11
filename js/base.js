@@ -48,46 +48,51 @@ function interp(a, b, mix, type) {
   }
 }
 
-var default_vs = 'attribute vec3 aVertexPosition; \
-attribute vec3 aVertexNormal; \
-attribute vec4 aVertexColor; \
-uniform mat4 uMVMatrix; \
-uniform mat4 uPMatrix; \
-uniform mat4 uNMatrix; \
-varying vec4 vColor; \
-varying vec4 vPosition; \
-varying vec3 vNormal; \
-void main(void) { \
-  vPosition = uMVMatrix * vec4(aVertexPosition, 1.0); \
-  gl_Position = uPMatrix * vPosition; \
-  vNormal = (uNMatrix * vec4(aVertexNormal, 1.0)).xyz; \
-  vColor = aVertexColor; \
-}';
-var default_fs = 'precision mediump float; \
-varying vec4 vColor; \
-varying vec4 vPosition; \
-varying vec3 vNormal; \
-uniform bool useLighting; \
-uniform vec3 ambientColor; \
-uniform float specular, shininess; \
-uniform vec3 lightPosition, lightColor; \
-void main(void) { \
-  vec3 weight; \
-  if (!useLighting) \
-    gl_FragColor = vColor; \
-  else { \
-    vec3 normal = normalize(vNormal); \
-    float spec, ndotl = max(dot(normal, lightPosition), 0.0); \
-    vec3 light = ambientColor + lightColor * ndotl; \
-    if(ndotl >= 0.0) { \
-      vec3 viewDir = normalize(-vPosition.xyz); \
-      spec = specular * pow(max(0.0, dot(reflect(-normalize(lightPosition), normal), viewDir)), shininess); \
-    } else { \
-      spec = 0.0; \
-    } \
-    gl_FragColor = vec4(vColor.rgb * light + spec, vColor.a); \
-  } \
-}';
+var default_vs = <shader>
+attribute vec3 aVertexPosition;
+attribute vec3 aVertexNormal;
+attribute vec4 aVertexColor;
+uniform mat4 uMVMatrix;
+uniform mat4 uPMatrix;
+uniform mat4 uNMatrix;
+varying vec4 vColor;
+varying vec4 vPosition;
+varying vec3 vNormal;
+void main(void) {
+  vPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+  gl_Position = uPMatrix * vPosition;
+  vNormal = (uNMatrix * vec4(aVertexNormal, 1.0)).xyz;
+  vColor = aVertexColor;
+}
+</shader>;
+
+var default_fs = <shader>
+precision mediump float;
+varying vec4 vColor;
+varying vec4 vPosition;
+varying vec3 vNormal;
+uniform bool useLighting;
+uniform vec3 ambientColor;
+uniform float specular, shininess;
+uniform vec3 lightPosition, lightColor;
+void main(void) {
+  vec3 weight;
+  if (!useLighting)
+    gl_FragColor = vColor;
+  else {
+    vec3 normal = normalize(vNormal);
+    float spec, ndotl = max(dot(normal, lightPosition), 0.0);
+    vec3 light = ambientColor + lightColor * ndotl;
+    if(ndotl >= 0.0) {
+      vec3 viewDir = normalize(-vPosition.xyz);
+      spec = specular * pow(max(0.0, dot(reflect(-normalize(lightPosition), normal), viewDir)), shininess);
+    } else {
+      spec = 0.0;
+    }
+    gl_FragColor = vec4(vColor.rgb * light + spec, vColor.a);
+  }
+}
+</shader>;
 
 function compile(vs, fs, attribs, uniforms) {
   function sub(src, type) {
@@ -200,7 +205,7 @@ function run(patch, audio, div) {
     if(audio)
 	    time = audio.currentTime;
 	else
-		time = new Date - start;
+		time = (new Date - start) / 1000;
     if(div)
       div.innerHTML = time;
     patch.update();
