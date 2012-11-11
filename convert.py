@@ -3,6 +3,31 @@ from biplist import readPlist
 from pprint import pprint
 import yaml
 import json
+try:
+  from jsmin import jsmin
+except:
+  jsmin = lambda x: x
+
+jsdeps = ['matrix', 'base']
+
+packing = False
+
+nameMap = {}
+nameI = 0
+def genName(name):
+  global nameI
+  if not packing:
+    return name
+  if name not in nameMap:
+    i = nameI
+    nameI += 1
+    rep = '_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'[i % 53]
+    i /= 53
+    while i:
+      rep += '_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[i % 63]
+      i /= 63
+    nameMap[name] = rep
+  return nameMap[name]
 
 def pruneUserInfo(data):
   if isinstance(data, list):
@@ -20,6 +45,49 @@ def fix(name):
   if name[0] in '0123456789':
     return '_' + name
   return name
+
+"""
+def shadermin(shader)
+  shader.gsub! '$resolution', 'r'
+  shader.gsub! '$time', 'r.z'
+  shader.gsub! /\/\/.*$/, ''
+  shader.gsub! /\s+/m, ' '
+  shader.gsub! /\/\*.*?\*\//, ''
+  shader.gsub! /\.0+([^0-9])/, '.\1'
+  shader.gsub! /0+([1-9]+\.[^a-z_])/i, '\1'
+  shader.gsub! /0+([1-9]*\.[0-9])/, '\1'
+  shader.gsub! /\s*(;|{|}|\(|\)|=|\+|-|\*|\/|\[|\]|,|\.|%|!|~|\?|:|<|>)\s*/m, '\1'
+  shader.strip!
+  shader
+end
+"""
+
+def shadermin(shader):
+  out = [shader]
+  gsub = lambda x, y, m=False: out.__setitem__(0, re.sub(x, y, out[0], flags=(re.M if m else 0)|re.I))
+
+  gsub(r'//.*$', '')
+  gsub(r'\s+', ' ', True)
+  gsub(r'/*.*?\*/', '')
+  gsub(r'\.0+([^0-9])', r'.\1')
+  gsub(r'0+([1-9]+\.[^a-z_])', r'\1')
+  gsub(r'0+([1-9]*\.[0-9])', r'\1')
+  gsub(r'\s*(;|{|}|\(|\)|=|\+|-|\*|/|\[|\]|,|\.|%|!|~|\?|:|<|>)\s*', r'\1', True)
+
+  return out[0]
+
+def processJS(code):
+  out = ''
+  while len(code):
+    try:
+      first, body = code.split('<shader>', 1)
+      body, code = body.split('</shader>', 1)
+    except:
+      out += code
+      break
+    out += first
+    out += repr(shadermin(body))
+  return out
 
 def rewriteJS(script):
   script = re.sub(r'/\*[\s\S]*?\*/', '', script, flags=re.M)
@@ -101,6 +169,8 @@ class Node(object):
   def __init__(self):
     self.format = None
     self.cls = self.__class__.__name__
+    if self.cls not in jsdeps:
+      jsdeps.append(self.cls)
     self.outports = {}
     for port in self._outports:
       port = fix(str(port))
@@ -150,13 +220,14 @@ class QCPatch(Node):
       self.name += str(id(self))
     else:
       self.name = 'rootPatch'
+    self.name = genName(self.name)
     self.nodes = {}
     deps = {}
     state = patch['state']
     for elem in state['nodes']:
       if elem['class'] == 'QCPatch':
-        self.nodes[elem['key']] = QCPatch(elem)
-        deps[elem['key']] = []
+        self.nodes[genName(elem['key'])] = QCPatch(elem)
+        deps[genName(elem['key'])] = []
         continue
 
       try:
@@ -164,7 +235,7 @@ class QCPatch(Node):
       except:
         print 'No class', elem['class']
         sys.exit()
-      node.name = elem['key']
+      node.name = genName(elem['key'])
       if 'identifier' in elem:
         node.format = elem['identifier']
       estate = elem['state']
@@ -200,13 +271,13 @@ class QCPatch(Node):
       if 'script' in estate:
         node.func = rewriteJS(estate['script'])
 
-      self.nodes[elem['key']] = node
-      deps[elem['key']] = []
+      self.nodes[node.name] = node
+      deps[node.name] = []
 
     if 'connections' in state:
       for v in state['connections'].values():
-        source = v['sourceNode'], v['sourcePort']
-        dest = v['destinationNode'], v['destinationPort']
+        source = genName(v['sourceNode']), v['sourcePort']
+        dest = genName(v['destinationNode']), v['destinationPort']
         sport = self.nodes[source[0]].outport(source[1])
         self.nodes[dest[0]].inport(dest[1], sport)
         if source[0] not in deps[dest[0]]:
@@ -269,6 +340,8 @@ for name, elem in classes.items():
   globals()['QC' + name] = type('QC' + name, (Node, ), body)
 
 def main(fn, audio='none', debug=False):
+  global packing
+
   data = readPlist(fn)
   try:
     del data['templateImageData']
@@ -281,10 +354,11 @@ def main(fn, audio='none', debug=False):
   #print '</pre>'
   #print '<h1>QtzWeb</h1>'
 
+  if not debug:
+    packing = True
+
   root = QCPatch(data['rootPatch'])
   print '<style>body { margin: 0; overflow: hidden; }</style>'
-  print '<script src="glmatrix-min.js"></script>'
-  print '<script src="qc.js"></script>'
   if audio != 'none':
     print '<audio id="track"', 
     if debug:
@@ -295,10 +369,20 @@ def main(fn, audio='none', debug=False):
     print '</audio>'
   if debug:
     print '<div id="time"></div>'
+  elif audio == 'none':
+    print '<span>'
   print '<script>'
-  print 'init();'
-  print root.code()
-  print 'run(rootPatch, document.getElementById("track"), document.getElementById("time"));'
+  code = root.code()
+  deps = ''
+  for dep in jsdeps:
+    deps += processJS(file('js/' + dep + '.js').read())
+  deps += 'init();'
+  code = deps + code
+  if debug:
+    print code
+  else:
+    print jsmin(code)
+  print 'run(' + root.name + ', document.getElementById("track"), document.getElementById("time"));'
   print '</script>'
 
 if __name__=='__main__':
