@@ -1,7 +1,8 @@
-import sys
+import re, sys
 from biplist import readPlist
 from pprint import pprint
-from yaml import load
+import yaml
+import json
 
 def pruneUserInfo(data):
   if isinstance(data, list):
@@ -20,8 +21,18 @@ def fix(name):
     return '_' + name
   return name
 
+def rewriteJS(script):
+  script = re.sub(r'/\*[\s\S]*?\*/', '', script, flags=re.M)
+  script = re.sub(r'//.*$', '', script, flags=re.M)
+  prolog, script = script.split('{', 1)
+  #params = prolog.split('main', 1)[1]
+  #params = params.split('(', 1)[1].split(')', 1)[0].split(',')
+  #params = [param.strip().split(' ')[-1] for param in params]
+  script = 'function(params) { with(params) { ' + script + '}'
+  return script
+
 def dump(plist):
-  #pprint(plist)
+  pprint(plist)
   def dumpNode(obj, tab=0):
     def line(x, i=0):
       print '  ' * (tab+i) + x
@@ -50,6 +61,14 @@ def dump(plist):
           name = fix(name)
           if name not in anodes[node['key']][2]:
             anodes[node['key']][2].append(name)
+      if 'fragmentShader' in state:
+        anodes[node['key']][2].append('FragmentShader')
+      if 'vertexShader' in state:
+        anodes[node['key']][2].append('VertexShader')
+      if 'expression' in state:
+        anodes[node['key']][2].append('Expression')
+      for key in state:
+        anodes[node['key']][2].append('__state.' + key)
 
     for conn in connections:
       dest = fix(conn['destinationPort'])
@@ -94,8 +113,13 @@ class Node(object):
       if port not in self.inports:
         self.inports[port] = None
 
+    self.sub = self.func = None
+
   def outport(self, name):
-    return self.outports[fix(name)].ref()
+    name = fix(name)
+    if name not in self.outports:
+      self.outports[name] = OutPort(self, name)
+    return self.outports[name].ref()
 
   def inport(self, name, value):
     self.inports[fix(name)] = value
@@ -109,18 +133,31 @@ class OutPort(object):
     self.refs += 1
     return self
 
+  def code(self):
+    if self.srcnode.cls == 'QCIteratorVariables':
+      return 'this.%s' % self.srcport
+    return 'this.nodes.%s.outs.%s' % (self.srcnode.name, self.srcport)
+
 class QCPatch(Node):
   def __init__(self, patch):
-    self.name = 'rootPatch' # XXX: Need to know how to pull names out of subpatches
+    Node.__init__(self)
+
+    if 'key' in patch:
+      if patch['class'] == 'QCPatch':
+        self.name = patch['key']
+      else:
+        self.name = '__patch__' + patch['key']
+      self.name += str(id(self))
+    else:
+      self.name = 'rootPatch'
     self.nodes = {}
     deps = {}
     state = patch['state']
     for elem in state['nodes']:
-      try:
-        if not elem['systemInputPortStates']['_enable']['value']:
-          continue
-      except:
-        pass
+      if elem['class'] == 'QCPatch':
+        self.nodes[elem['key']] = QCPatch(elem)
+        deps[elem['key']] = []
+        continue
 
       try:
         node = globals()[elem['class']]()
@@ -132,6 +169,19 @@ class QCPatch(Node):
         node.format = elem['identifier']
       estate = elem['state']
 
+      _statemap = dict(
+        fragmentShader='FragmentShader', 
+        vertexShader='VertexShader', 
+        expression='Expression', 
+        outputCount='OutputCount', 
+        portClass='PortClass', 
+        resetOutputs='ResetOutputs', 
+        numberOfLights='NumberOfLights', 
+        slices='Slices', 
+        stacks='Stacks', 
+        operationCount='OperationCount', 
+      )
+
       if 'customInputPortStates' in estate:
         for k, v in estate['customInputPortStates'].items():
           if 'value' in v:
@@ -139,20 +189,35 @@ class QCPatch(Node):
       if 'ivarInputPortStates' in estate:
         for k, v in estate['ivarInputPortStates'].items():
           node.inport(k, v['value'])
+      for k, v in _statemap.items():
+        if k in estate:
+          node.inport(v, estate[k])
+      if 'systemInputPortStates' in estate and '_enable' in estate['systemInputPortStates']:
+        node.inport('_enable', estate['systemInputPortStates']['_enable']['value'])
+
+      if 'nodes' in estate:
+        node.sub = QCPatch(elem)
+      if 'script' in estate:
+        node.func = rewriteJS(estate['script'])
 
       self.nodes[elem['key']] = node
       deps[elem['key']] = []
 
-    for v in state['connections'].values():
-      source = v['sourceNode'], v['sourcePort']
-      dest = v['destinationNode'], v['destinationPort']
-      sport = self.nodes[source[0]].outport(source[1])
-      self.nodes[dest[0]].inport(dest[1], sport)
-      if source[0] not in deps[dest[0]]:
-        deps[dest[0]].append(source[0])
+    if 'connections' in state:
+      for v in state['connections'].values():
+        source = v['sourceNode'], v['sourcePort']
+        dest = v['destinationNode'], v['destinationPort']
+        sport = self.nodes[source[0]].outport(source[1])
+        self.nodes[dest[0]].inport(dest[1], sport)
+        if source[0] not in deps[dest[0]]:
+          deps[dest[0]].append(source[0])
 
-    # XXX: Have to have a way to specify ordering of nodes ... Clear should be first.
+    # XXX: We should preserve node order in the plist but still handle deps.
     self.order = []
+    for name, v in deps.items():
+      if self.nodes[name].cls == 'QCClear':
+        del deps[name]
+        self.order.append(name)
     while len(deps):
       for name, v in deps.items():
         for dep in v:
@@ -166,26 +231,34 @@ class QCPatch(Node):
     code = '%s = new QCPatch();\n' % self.name
     for name in self.order:
       node = self.nodes[name]
-      args = []
+      if node.cls == 'QCIteratorVariables':
+        continue
+      args = {}
       if node.format:
-        args.append('_format: ' + repr(node.format))
+        args['_format'] = node.format
       for pname, value in node.inports.items():
         if not isinstance(value, OutPort):
-          args.append('%s: %r' % (pname, value))
-      args = ', '.join(args)
-      code += '%s.nodes.%s = new %s({%s});\n' % (self.name, name, node.cls, args)
+          args[pname] = value
+      if node.sub:
+        code += node.sub.code()
+      if node.cls == 'QCPatch':
+        code += '%s.nodes.%s = %s' % (self.name, node.name, node.code())
+      else:
+        code += '%s.nodes.%s = new %s(%s%s%s);\n' % (self.name, name, node.cls, (node.func + ', ') if node.func else '', (node.sub.name + ', ') if node.sub else '', json.dumps(args))
     code += '%s.update(function() {\n' % self.name
     for name in self.order:
       node = self.nodes[name]
+      name = node.name
+      if node.cls == 'QCIteratorVariables':
+        continue
       for pname, value in node.inports.items():
         if isinstance(value, OutPort):
-          code += '\tthis.nodes.%s.params.%s = this.nodes.%s.outs.%s;\n' % (name, pname, value.srcnode.name, value.srcport)
+          code += '\tthis.nodes.%s.params.%s = %s;\n' % (name, pname, value.code())
       code += '\tthis.nodes.%s.update();\n' % name
     code += '});\n'
-    code += 'run(%s);' % self.name
     return code
 
-classes = load(file('classes.yaml').read())
+classes = yaml.load(file('classes.yaml').read())
 
 for name, elem in classes.items():
   body = dict()
@@ -195,19 +268,36 @@ for name, elem in classes.items():
     body['_outports'] = elem['out']
   globals()['QC' + name] = type('QC' + name, (Node, ), body)
 
-def main(fn):
+def main(fn, debug=False):
   data = readPlist(fn)
-  del data['templateImageData']
+  try:
+    del data['templateImageData']
+  except:
+    pass
   pruneUserInfo(data)
 
-  print '<pre>'
-  dump(data)
-  print '</pre>'
+  #print '<pre>'
+  #dump(data)
+  #print '</pre>'
+  #print '<h1>QtzWeb</h1>'
 
   root = QCPatch(data['rootPatch'])
+  print '<style>body { margin: 0; overflow: hidden; }</style>'
+  print '<script src="glmatrix-min.js"></script>'
   print '<script src="qc.js"></script>'
+  print '<audio id="track"', 
+  if debug:
+    print 'controls', 
+  print 'preload="auto" autobuffer>'
+  print '<source src="music.mp3">'
+  print '<source src="music.ogg">'
+  print '</audio>'
+  if debug:
+    print '<div id="time"></div>'
   print '<script>'
+  print 'init();'
   print root.code()
+  print 'run(rootPatch, document.getElementById("track"), document.getElementById("time"));'
   print '</script>'
 
 if __name__=='__main__':

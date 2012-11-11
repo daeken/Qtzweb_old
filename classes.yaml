@@ -255,6 +255,9 @@ Gradient:
         # Vertical (Downside)
         # Horizontal (Leftside)
 
+GLSLShader:
+  _
+
 Grid:
   in:
     - WidthResolution # Horizontal Resolution
@@ -394,6 +397,10 @@ ImageInfo:
     - Transformation # Transformation
     - StaticMetadata # Static Medatada
 
+ImageLoader:
+  out:
+    - Image # Image
+
 ImageKernel:
   out:
     - Image # Image
@@ -498,6 +505,10 @@ IteratorVariables:
     - Count # Iterations
     - Position # Current Position
     - Index # Current Index
+
+JavaScript:
+  foo:
+    - pass
 
 LFO:
   in:
@@ -1003,6 +1014,20 @@ Smooth:
     - IncreasingDuration # Increasing Duration
   out:
     - Value # Smoothed Value
+
+Sphere:
+  in:
+    - Scale # Diameter
+    - ZBuffer # Unknown
+    - Blending # Blend mode
+    - Z # Z Position
+    - RY # Y Rotation
+    - X # X Position
+    - Y # Y Position
+    - Culling # Culling mode
+    - RX # X Rotation
+    - RZ # Z Rotation
+    - Color # Color
 
 Splitter:
   in:
