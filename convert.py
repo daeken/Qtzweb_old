@@ -74,7 +74,7 @@ def shadermin(shader):
   gsub(r'0+([1-9]*\.[0-9])', r'\1')
   gsub(r'\s*(;|{|}|\(|\)|=|\+|-|\*|/|\[|\]|,|\.|%|!|~|\?|:|<|>)\s*', r'\1', True)
 
-  return out[0]
+  return out[0].strip()
 
 def processJS(code):
   out = ''
