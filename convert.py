@@ -268,7 +268,7 @@ for name, elem in classes.items():
     body['_outports'] = elem['out']
   globals()['QC' + name] = type('QC' + name, (Node, ), body)
 
-def main(fn, debug=False):
+def main(fn, audio='none', debug=False):
   data = readPlist(fn)
   try:
     del data['templateImageData']
@@ -285,13 +285,14 @@ def main(fn, debug=False):
   print '<style>body { margin: 0; overflow: hidden; }</style>'
   print '<script src="glmatrix-min.js"></script>'
   print '<script src="qc.js"></script>'
-  print '<audio id="track"', 
-  if debug:
-    print 'controls', 
-  print 'preload="auto" autobuffer>'
-  print '<source src="music.mp3">'
-  print '<source src="music.ogg">'
-  print '</audio>'
+  if audio != 'none':
+    print '<audio id="track"', 
+    if debug:
+      print 'controls', 
+    print 'preload="auto" autobuffer>'
+    print '<source src="' + audio + '.mp3">'
+    print '<source src="' + audio + '.ogg">'
+    print '</audio>'
   if debug:
     print '<div id="time"></div>'
   print '<script>'
