@@ -9,7 +9,8 @@ except:
   jsmin_ = lambda x: x
 import httplib, urllib
 
-jsdeps = ['matrix', 'base']
+basedeps = ['matrix', 'base']
+jsdeps = basedeps[:]
 
 packing = False
 
@@ -104,7 +105,7 @@ def rewriteJS(script):
   return script
 
 def dump(plist):
-  pprint(plist)
+  #pprint(plist)
   def dumpNode(obj, tab=0):
     def line(x, i=0):
       print '  ' * (tab+i) + x
@@ -249,6 +250,7 @@ class QCPatch(Node):
         vertexShader='VertexShader', 
         expression='Expression', 
         outputCount='OutputCount', 
+        inputCount='InputCount', 
         portClass='PortClass', 
         resetOutputs='ResetOutputs', 
         numberOfLights='NumberOfLights', 
@@ -378,8 +380,15 @@ def main(fn, audio='none', debug=False):
   print '<script>'
   code = root.code()
   deps = ''
-  for dep in jsdeps:
-    deps += processJS(file('js/' + dep + '.js').read())
+  for depcls in jsdeps:
+    try:
+      dep = file('js/' + depcls + '.js').read()
+      if debug and depcls not in basedeps:
+        print >>sys.stderr, 'Patch used:', depcls
+    except:
+      print >>sys.stderr, 'Unsupported patch class:', depcls
+    else:
+      deps += processJS(dep)
   deps += 'init();'
   code = deps + code
   if debug:
